@@ -1,20 +1,13 @@
 telegram:
-  enabled: true   # kalau mau non-aktif sementara, ganti ke false
+  enabled: false     # kalau belum siap Telegram, pakai false dulu
 
-evm_chains:
-  - id: "eth"
-    rpc_env: "RPC_ETH"
-    dex_type: "uniswap_v2"
-    from_block_start: 21000000
-
-  - id: "arb"
-    rpc_env: "RPC_ARB"
-    dex_type: "uniswap_v2"
-    from_block_start: 19000000
-
+# Perp platform – pakai Hyperliquid Info API
 perp_platforms:
   - name: "hyperliquid"
     base_url_env: "HYPERLIQUID_BASE_URL"
+
+# (spot masih mock; kalau nanti mau EVM nyata, kita tambah di sini)
+evm_chains: []
 
 thresholds:
   min_wallet_score: 70
@@ -23,6 +16,7 @@ thresholds:
   min_perp_size_usd: 5000
   risk_per_trade_default: 0.01   # 1% risk per trade
 
+# Wallet yang kamu anggap "smart money"
 tracked_wallets:
   - address: "0xMOCKWALLET"
     initial_score: 85
