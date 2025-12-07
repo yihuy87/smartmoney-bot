@@ -21,25 +21,6 @@ def load_config():
         return yaml.safe_load(f)
 
 
-def compute_wallet_stats_dummy(db: Session, wallet_address: str) -> WalletStats:
-    """
-    Placeholder statistik wallet.
-    - Kalau ada initial_score di config → dipakai sebagai "winrate dasar".
-    - Kalau tidak → kita pakai default 0.6 (60% winrate).
-    """
-    base = get_tracked_wallet_info(wallet_address) or {}
-    default_score = base.get("initial_score", 0) / 100.0
-    winrate = default_score if default_score > 0 else 0.6
-    return WalletStats(
-        winrate_30d=winrate,
-        pnl_30d_usd=0.5,
-        max_drawdown_30d=0.2,
-        avg_leverage_30d=3.0,
-        rugpull_ratio_30d=0.05,
-        avg_trade_size_ratio=0.1,
-    )
-
-
 def seed_tracked_wallets(db: Session, config):
     """
     Seed awal dari config.tracked_wallets (opsional).
@@ -125,24 +106,21 @@ def main_loop():
             # ==== Update skor wallet untuk wallet yang ada event baru ====
             affected_wallets = set()
             for e in all_perp_events:
-                affected_wallets.add(e["wallet_address"])
+            affected_wallets.add(e["wallet_address"].lower())
 
             for addr in affected_wallets:
-                stats = compute_wallet_stats_dummy(db, addr)
-                score = compute_smart_score(stats)
-                tier = classify_tier(score)
                 wallet = db.query(Wallet).get(addr)
                 if not wallet:
+                    # kalau ada wallet baru (misal dari config manual, belum pernah masuk leaderboard)
                     wallet = Wallet(address=addr)
                     db.add(wallet)
-                wallet.smart_score = score
-                wallet.tier = tier
-                wallet.winrate_30d = stats.winrate_30d
-                wallet.pnl_30d_usd = stats.pnl_30d_usd
-                wallet.max_drawdown_30d = stats.max_drawdown_30d
-                wallet.avg_leverage_30d = stats.avg_leverage_30d
-                wallet.rugpull_ratio_30d = stats.rugpull_ratio_30d
-                wallet.avg_trade_size_ratio = stats.avg_trade_size_ratio
+
+            score = compute_smart_score_from_wallet(wallet)
+            tier = classify_tier(score)
+
+            wallet.smart_score = score
+            wallet.tier = tier
+
             db.commit()
 
             # ==== Signals dari perp (spot_events kosong) ====
