@@ -1,5 +1,5 @@
 telegram:
-  enabled: false     # kalau mau pakai Telegram, ganti ke true
+  enabled: true     # kalau mau pakai Telegram, ganti ke true
 
 # tidak pakai spot onchain dulu
 evm_chains: []
