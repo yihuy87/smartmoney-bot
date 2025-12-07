@@ -9,12 +9,12 @@ perp_platforms:
     base_url_env: "HYPERLIQUID_BASE_URL"
 
 thresholds:
-  min_wallet_score: 70
+  min_wallet_score: 60
   min_spot_size_usd: 1000
   min_liquidity_usd: 200000
-  min_perp_size_usd: 100
+  min_perp_size_usd: 500
   risk_per_trade_default: 0.01   # 1% risk per trade
 
 discovery:
-  top_n: 50             # ambil top 50 dari leaderboard
-  min_account_value: 10000   # minimal equity $10k
+  top_n: 20             # ambil top 20 dari leaderboard
+  min_account_value: 20000   # minimal equity $10k
