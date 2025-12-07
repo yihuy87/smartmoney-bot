@@ -8,7 +8,6 @@ from .env import env
 from .models import Wallet
 from .tracked import load_config
 
-
 _config = load_config()
 _disc_cfg = _config.get("discovery", {}) if _config else {}
 
@@ -34,40 +33,40 @@ def _fetch_leaderboard_raw() -> dict:
         return {}
 
 
-def _extract_addresses_from_raw(raw: dict, top_n: int, min_account_value: float) -> List[str]:
+def _parse_row_stats(row: dict):
     """
-    Raw format (lihat client Go):
+    Format umum (berdasarkan stats server Hyperliquid):
     {
-      "leaderboardRows": [
-        {
-          "ethAddress": "0x....",
-          "accountValue": "12345.67",
-          "windowPerformances": [
-            [pnl_day, roi_day, vlm_day],
-            [pnl_week, roi_week, vlm_week],
-            [pnl_month, roi_month, vlm_month],
-            [pnl_all, roi_all, vlm_all]
-          ]
-        },
-        ...
+      "ethAddress": "0x....",
+      "accountValue": "12345.67",
+      "windowPerformances": [
+        [pnl_day, roi_day, volume_day],
+        [pnl_week, roi_week, volume_week],
+        [pnl_month, roi_month, volume_month],
+        [pnl_all, roi_all, volume_all]
       ]
     }
-    1
+
+    Kita ambil:
+    - accountValue
+    - pnl_all, roi_all (index ke-3 kalau ada)
     """
-    rows = raw.get("leaderboardRows", [])
-    addrs: List[str] = []
-    for row in rows[:top_n]:
-        try:
-            addr = row.get("ethAddress")
-            if not addr:
-                continue
-            acct_val = float(row.get("accountValue", "0") or 0.0)
-            if acct_val < min_account_value:
-                continue
-            addrs.append(addr)
-        except Exception:
-            continue
-    return addrs
+    acct_val = float(row.get("accountValue", "0") or 0.0)
+    pnl_all = 0.0
+    roi_all_frac = 0.0
+
+    windows = row.get("windowPerformances") or []
+    if len(windows) >= 4:
+        all_row = windows[3] or []
+        if len(all_row) >= 2:
+            try:
+                pnl_all = float(all_row[0] or 0.0)
+                roi_all_pct = float(all_row[1] or 0.0)
+                roi_all_frac = roi_all_pct / 100.0
+            except Exception:
+                pass
+
+    return acct_val, pnl_all, roi_all_frac
 
 
 def refresh_leaderboard_wallets(
@@ -76,8 +75,11 @@ def refresh_leaderboard_wallets(
     min_account_value: float = MIN_ACCOUNT_VALUE_DEFAULT,
 ) -> List[str]:
     """
-    Ambil leaderboard → update tabel Wallet → return list address yang dari leaderboard.
-    NOTE: kita tidak mengubah smart_score di sini; scoring engine akan handle sendiri.
+    Ambil leaderboard → update/insert Wallet dengan:
+    - account_value_usd
+    - pnl_all_usd
+    - roi_all
+    Return: list address (string) yang lulus filter.
     """
     logger.info(
         f"[Discovery] Refresh leaderboard wallets (top_n={top_n}, min_account_value={min_account_value})"
@@ -86,22 +88,39 @@ def refresh_leaderboard_wallets(
     if not raw:
         return []
 
-    addrs = _extract_addresses_from_raw(raw, top_n=top_n, min_account_value=min_account_value)
-    if not addrs:
-        logger.warning("[Discovery] No addresses passed filters from leaderboard")
-        return []
+    rows = raw.get("leaderboardRows", [])
+    selected_addrs: List[str] = []
 
-    existing = {w.address for w in db.query(Wallet).filter(Wallet.address.in_(addrs)).all()}
-    new_addrs = [a for a in addrs if a not in existing]
+    for row in rows[:top_n]:
+        try:
+            addr = row.get("ethAddress")
+            if not addr:
+                continue
+            acct_val, pnl_all, roi_all = _parse_row_stats(row)
+            if acct_val < min_account_value:
+                continue
 
-    for addr in new_addrs:
-        w = Wallet(address=addr)
-        db.add(w)
+            addr_lc = addr.lower()
+            wallet = db.query(Wallet).get(addr_lc)
+            if not wallet:
+                wallet = Wallet(address=addr_lc)
+                db.add(wallet)
 
-    if new_addrs:
-        logger.info(f"[Discovery] Added {len(new_addrs)} new wallets from leaderboard")
+            wallet.account_value_usd = acct_val
+            wallet.pnl_all_usd = pnl_all
+            wallet.roi_all = roi_all
+
+            selected_addrs.append(addr_lc)
+        except Exception as e:
+            logger.error(f"[Discovery] Error parsing leaderboard row: {e}")
+            continue
+
+    if selected_addrs:
         db.commit()
+        logger.info(
+            f"[Discovery] Upserted {len(selected_addrs)} wallets from leaderboard (after filters)"
+        )
     else:
-        logger.info("[Discovery] No new wallets to add from leaderboard")
+        logger.warning("[Discovery] No wallets passed filters from leaderboard")
 
-    return addrs
+    return selected_addrs
