@@ -8,18 +8,23 @@ from ..db import SessionLocal
 from ..models import Wallet
 from ..scoring import compute_smart_score, classify_tier, WalletStats
 from ..tracked import get_tracked_wallet_info
-from ..connectors.mock_connectors import MockSpotConnector, MockPerpConnector
 from ..connectors.perp_hyperliquid import HyperliquidConnector
 from ..bots.telegram_bot import TelegramAlerter
 from ..env import env
 from .signals import create_signals_from_events
 from .confluence import process_signals_into_alerts
 
+
 def load_config():
     with open("config.yaml", "r") as f:
         return yaml.safe_load(f)
 
+
 def compute_wallet_stats_dummy(db: Session, wallet_address: str) -> WalletStats:
+    """
+    Placeholder statistik wallet.
+    Kamu bisa ganti nanti pakai perhitungan bener dari history trade di DB.
+    """
     base = get_tracked_wallet_info(wallet_address) or {}
     default_score = base.get("initial_score", 0) / 100.0
     winrate = default_score if default_score > 0 else 0.6
@@ -31,6 +36,7 @@ def compute_wallet_stats_dummy(db: Session, wallet_address: str) -> WalletStats:
         rugpull_ratio_30d=0.05,
         avg_trade_size_ratio=0.1,
     )
+
 
 def seed_tracked_wallets(db: Session, config):
     tracked = config.get("tracked_wallets", [])
@@ -44,13 +50,15 @@ def seed_tracked_wallets(db: Session, config):
         wallet.tier = w.get("initial_tier", "A")
     db.commit()
 
+
 def main_loop():
     config = load_config()
     thresholds = config["thresholds"]
-    min_spot_size_usd = thresholds["min_spot_size_usd"]
+    min_spot_size_usd = thresholds["min_spot_size_usd"]   # sekarang tidak dipakai
     min_perp_size_usd = thresholds["min_perp_size_usd"]
     risk_default = thresholds["risk_per_trade_default"]
 
+    # Telegram (opsional)
     tele = None
     if config["telegram"]["enabled"]:
         tele = TelegramAlerter(
@@ -58,53 +66,41 @@ def main_loop():
             chat_id=env("TELEGRAM_CHAT_ID"),
         )
 
+    # Seed wallet dari config
     db0 = SessionLocal()
     seed_tracked_wallets(db0, config)
     db0.close()
 
-    # Connectors
-    spot_connectors = []
-    spot_connectors.append(MockSpotConnector(chain_id="mock"))
-
+    # Perp connector Hyperliquid
     perp_connectors = []
-    perp_connectors.append(MockPerpConnector())
-
     for p in config.get("perp_platforms", []):
         if p["name"] == "hyperliquid":
             base_url = env(p.get("base_url_env", ""), "https://api.hyperliquid.xyz/info")
             perp_connectors.append(HyperliquidConnector(base_url=base_url))
 
-    last_block = {c.chain_id: 0 for c in spot_connectors}
+    if not perp_connectors:
+        logger.error("No perp connectors configured. Check config.yaml")
+        return
+
     last_ts_perp = {pc.platform_name: int(time.time()) - 60 for pc in perp_connectors}
 
-    logger.info("Starting main loop (DB + tracked wallets)...")
+    logger.info("Starting main loop (perp-only Hyperliquid)...")
     while True:
         db = SessionLocal()
         try:
-            all_spot_events = []
+            all_spot_events = []   # kosong (kita nggak pakai spot sekarang)
             all_perp_events = []
 
-            # Spot (mock)
-            for conn in spot_connectors:
-                if last_block[conn.chain_id] == 0:
-                    last_block[conn.chain_id] = conn.get_latest_block()
-                    continue
-                new_block = conn.get_latest_block()
-                if new_block > last_block[conn.chain_id]:
-                    ev = conn.fetch_new_events(last_block[conn.chain_id] + 1, new_block)
-                    all_spot_events.extend(ev)
-                    last_block[conn.chain_id] = new_block
-
-            # Perp (mock + hyperliquid)
+            # Perp (Hyperliquid)
             now_ts = int(time.time())
             for pc in perp_connectors:
                 ev = pc.fetch_new_events(last_ts_perp[pc.platform_name])
                 all_perp_events.extend(ev)
                 last_ts_perp[pc.platform_name] = now_ts
 
-            # Update skor wallet
+            # Update skor wallet untuk wallet yang ada event baru
             affected_wallets = set()
-            for e in all_spot_events + all_perp_events:
+            for e in all_perp_events:
                 affected_wallets.add(e["wallet_address"])
 
             for addr in affected_wallets:
@@ -125,7 +121,7 @@ def main_loop():
                 wallet.avg_trade_size_ratio = stats.avg_trade_size_ratio
             db.commit()
 
-            # Signals
+            # Generate signals → hanya dari perp (spot_events kosong)
             new_signals = create_signals_from_events(
                 db,
                 all_spot_events,
@@ -134,14 +130,14 @@ def main_loop():
                 min_perp_size_usd=min_perp_size_usd,
             )
 
-            # Alerts
+            # Signals → Alerts (+ trade setup)
             alerts = process_signals_into_alerts(
                 db,
                 new_signals,
                 risk_per_trade_default=risk_default,
             )
 
-            # Telegram
+            # Kirim ke Telegram (kalau aktif)
             if tele:
                 for a in alerts:
                     tele.send_alert(a)
