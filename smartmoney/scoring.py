@@ -62,7 +62,7 @@ def compute_smart_score(stats: WalletStats) -> float:
     lev_score = _map_leverage(stats.avg_leverage_30d)
     rug_score = _map_rugpull_ratio(stats.rugpull_ratio_30d)
     size_score = _map_size_ratio(stats.avg_trade_size_ratio)
-    behavior_score = 70  # placeholder sederhana
+    behavior_score = 70  # placeholder
 
     smart_score = (
         0.20 * winrate_score +
