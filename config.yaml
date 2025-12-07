@@ -21,3 +21,7 @@ tracked_wallets:
     initial_score: 85
     initial_tier: "S"
   # nanti ganti/tambah wallet beneran di sini
+
+  discovery:
+  top_n: 50
+  min_account_value: 20000
