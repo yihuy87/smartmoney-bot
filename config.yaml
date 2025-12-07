@@ -12,7 +12,7 @@ thresholds:
   min_wallet_score: 60
   min_spot_size_usd: 1000
   min_liquidity_usd: 200000
-  min_perp_size_usd: 500
+  min_perp_size_usd: 300
   risk_per_trade_default: 0.01   # 1% risk per trade
 
 discovery:
