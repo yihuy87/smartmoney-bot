@@ -1,26 +1,20 @@
-database:
-  url: "sqlite:///smartmoney.db"
-
 telegram:
-  enabled: false          # untuk awal boleh false, nanti kalau sudah siap -> true
-  bot_token: "ISI_TOKEN_BOT_TELEGRAM"
-  chat_id: "ISI_CHAT_ID_KAMU"
-
-tracked_wallets:
-  - address: "0xMOCKWALLET"   # buat testing dulu
-    initial_score: 85
-    initial_tier: "S"
+  enabled: true   # kalau mau non-aktif sementara, ganti ke false
 
 evm_chains:
-  # untuk awal bisa dikosongkan dulu, atau isi kalau sudah punya RPC
   - id: "eth"
-    rpc_url: "https://mainnet.infura.io/v3/YOUR_KEY"
+    rpc_env: "RPC_ETH"
     dex_type: "uniswap_v2"
     from_block_start: 21000000
 
+  - id: "arb"
+    rpc_env: "RPC_ARB"
+    dex_type: "uniswap_v2"
+    from_block_start: 19000000
+
 perp_platforms:
   - name: "hyperliquid"
-    base_url: "https://api.hyperliquid.xyz"
+    base_url_env: "HYPERLIQUID_BASE_URL"
 
 thresholds:
   min_wallet_score: 70
@@ -28,3 +22,8 @@ thresholds:
   min_liquidity_usd: 200000
   min_perp_size_usd: 5000
   risk_per_trade_default: 0.01   # 1% risk per trade
+
+tracked_wallets:
+  - address: "0xMOCKWALLET"
+    initial_score: 85
+    initial_tier: "S"
