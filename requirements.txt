@@ -1,7 +1,7 @@
 SQLAlchemy
 pydantic
 PyYAML
-python-telegram-bot
+python-telegram-bot==21.6
 web3
 requests
 loguru
