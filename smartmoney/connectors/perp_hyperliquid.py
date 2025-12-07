@@ -5,38 +5,30 @@ import requests
 from loguru import logger
 
 from .base_perp import BasePerpConnector
-from ..tracked import load_config
-
-# ambil list wallet dari config.yaml (tracked_wallets)
-_config = load_config()
-_TRACKED = [w["address"] for w in _config.get("tracked_wallets", [])]
 
 
 class HyperliquidConnector(BasePerpConnector):
     """
     Connector perp Hyperliquid pakai Info API (public):
     - type: "userFillsByTime"
-    - per wallet, ambil trade perp (Open/Increase Long/Short)
-    Dok: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint
+    - Per wallet, ambil trade perp (Open/Increase Long/Short)
+    - Daftar wallet diisi dinamis lewat .set_tracked_wallets([...])
+    Dok: info endpoint & userFillsByTime.2
     """
 
     def __init__(self, base_url: str = "https://api.hyperliquid.xyz/info"):
         self.platform_name = "hyperliquid"
         self.base_url = base_url.rstrip("/")
+        self._tracked_wallets: List[str] = []
+
+    # === new: dynamic list ===
+    def set_tracked_wallets(self, wallets: List[str]):
+        # normalisasi: lowercase + unik
+        uniq = {w.lower() for w in wallets if w}
+        self._tracked_wallets = list(uniq)
+        logger.info(f"[Hyperliquid] Tracked wallets updated, count={len(self._tracked_wallets)}")
 
     def _fetch_fills_for_wallet(self, wallet: str, since_ts: int) -> List[Dict[str, Any]]:
-        """
-        POST https://api.hyperliquid.xyz/info
-        body:
-        {
-          "type": "userFillsByTime",
-          "user": "0x....",
-          "startTime": <ms>,
-          "endTime": <ms>,
-          "aggregateByTime": true
-        }
-        Returns: list of fills (perp + spot, kita filter sendiri).
-        """
         start_ms = since_ts * 1000
         end_ms = int(time.time() * 1000)
 
@@ -73,28 +65,23 @@ class HyperliquidConnector(BasePerpConnector):
         return fills
 
     def fetch_new_events(self, since_ts: int) -> List[Dict[str, Any]]:
-        """
-        Convert fills -> perp events:
-        - doc: "Returns at most 2000 fills per response and only the 10000 most recent fills are available" 1
-        - Kita ambil hanya:
-          * perp coin (coin seperti 'BTC', 'ETH', dll)
-          * arah:
-            - 'Open Long', 'Increase Long' → LONG
-            - 'Open Short', 'Increase Short' → SHORT
-        - size_usd = px * sz (kasar tapi cukup buat sinyal)
-        """
         all_events: List[Dict[str, Any]] = []
         now = int(time.time())
 
-        logger.info(f"[Hyperliquid] Fetching fills since {since_ts} for tracked wallets...")
+        if not self._tracked_wallets:
+            logger.info("[Hyperliquid] No tracked wallets set, skipping fetch")
+            return []
 
-        for wal in _TRACKED:
+        logger.info(
+            f"[Hyperliquid] Fetching fills since {since_ts} for {len(self._tracked_wallets)} wallets..."
+        )
+
+        for wal in self._tracked_wallets:
             fills = self._fetch_fills_for_wallet(wal, since_ts)
             for f in fills:
                 try:
                     coin = f.get("coin")
-                    # Spot fill: coin seperti '@107' atau 'PURR/USDC' (lihat docs) 2
-                    # Kita mau perp coin saja (BTC, ETH, SOL, dll)
+                    # Spot fill: coin '@idx' atau 'PURR/USDC' → kita skip, mau perp coin saja
                     if not coin or coin.startswith("@") or "/" in coin:
                         continue
 
@@ -132,7 +119,7 @@ class HyperliquidConnector(BasePerpConnector):
                             "event_type": event_type,
                             "entry_price": px,
                             "size_usd": size_usd,
-                            "leverage": 1.0,  # Info API tidak expose leverage langsung
+                            "leverage": 1.0,
                             "timestamp": ts,
                         }
                     )
