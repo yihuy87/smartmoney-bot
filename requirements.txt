@@ -5,3 +5,4 @@ python-telegram-bot
 web3
 requests
 loguru
+python-dotenv
