@@ -5,16 +5,19 @@ import requests
 from loguru import logger
 
 from .base_perp import BasePerpConnector
-from ..tracked import is_tracked_wallet, load_config
+from ..tracked import load_config
 
+# ambil list wallet dari config.yaml (tracked_wallets)
 _config = load_config()
 _TRACKED = [w["address"] for w in _config.get("tracked_wallets", [])]
+
 
 class HyperliquidConnector(BasePerpConnector):
     """
     Connector perp Hyperliquid pakai Info API (public):
-    - type: userFillsByTime
+    - type: "userFillsByTime"
     - per wallet, ambil trade perp (Open/Increase Long/Short)
+    Dok: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint
     """
 
     def __init__(self, base_url: str = "https://api.hyperliquid.xyz/info"):
@@ -22,6 +25,18 @@ class HyperliquidConnector(BasePerpConnector):
         self.base_url = base_url.rstrip("/")
 
     def _fetch_fills_for_wallet(self, wallet: str, since_ts: int) -> List[Dict[str, Any]]:
+        """
+        POST https://api.hyperliquid.xyz/info
+        body:
+        {
+          "type": "userFillsByTime",
+          "user": "0x....",
+          "startTime": <ms>,
+          "endTime": <ms>,
+          "aggregateByTime": true
+        }
+        Returns: list of fills (perp + spot, kita filter sendiri).
+        """
         start_ms = since_ts * 1000
         end_ms = int(time.time() * 1000)
 
@@ -58,20 +73,28 @@ class HyperliquidConnector(BasePerpConnector):
         return fills
 
     def fetch_new_events(self, since_ts: int) -> List[Dict[str, Any]]:
+        """
+        Convert fills -> perp events:
+        - doc: "Returns at most 2000 fills per response and only the 10000 most recent fills are available" 1
+        - Kita ambil hanya:
+          * perp coin (coin seperti 'BTC', 'ETH', dll)
+          * arah:
+            - 'Open Long', 'Increase Long' → LONG
+            - 'Open Short', 'Increase Short' → SHORT
+        - size_usd = px * sz (kasar tapi cukup buat sinyal)
+        """
         all_events: List[Dict[str, Any]] = []
         now = int(time.time())
 
         logger.info(f"[Hyperliquid] Fetching fills since {since_ts} for tracked wallets...")
 
         for wal in _TRACKED:
-            if not is_tracked_wallet(wal):
-                continue
-
             fills = self._fetch_fills_for_wallet(wal, since_ts)
             for f in fills:
                 try:
                     coin = f.get("coin")
-                    # Spot fill biasanya coin seperti '@107' atau 'PURR/USDC' → skip, kita mau perp coin saja
+                    # Spot fill: coin seperti '@107' atau 'PURR/USDC' (lihat docs) 2
+                    # Kita mau perp coin saja (BTC, ETH, SOL, dll)
                     if not coin or coin.startswith("@") or "/" in coin:
                         continue
 
@@ -89,7 +112,7 @@ class HyperliquidConnector(BasePerpConnector):
                         direction = "SHORT"
                         event_type = "INCREASE"
                     else:
-                        # Close / spot tidak kita pakai untuk entry sinyal
+                        # Close / lainnya nggak dipakai sebagai sinyal entry
                         continue
 
                     px = float(f.get("px", "0") or 0.0)
@@ -109,7 +132,7 @@ class HyperliquidConnector(BasePerpConnector):
                             "event_type": event_type,
                             "entry_price": px,
                             "size_usd": size_usd,
-                            "leverage": 1.0,
+                            "leverage": 1.0,  # Info API tidak expose leverage langsung
                             "timestamp": ts,
                         }
                     )
