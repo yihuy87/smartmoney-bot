@@ -1,23 +1,23 @@
 telegram:
-  enabled: false     # kalau belum siap Telegram, pakai false dulu
+  enabled: false     # kalau mau pakai Telegram, ganti ke true
 
-# Perp platform – pakai Hyperliquid Info API
+# tidak pakai spot onchain dulu
+evm_chains: []
+
 perp_platforms:
   - name: "hyperliquid"
     base_url_env: "HYPERLIQUID_BASE_URL"
 
-# (spot masih mock; kalau nanti mau EVM nyata, kita tambah di sini)
-evm_chains: []
-
 thresholds:
   min_wallet_score: 70
-  min_spot_size_usd: 1000
-  min_liquidity_usd: 200000
+  min_spot_size_usd: 1000       # sekarang tidak terpakai (nggak ada spot)
+  min_liquidity_usd: 200000     # sama, bisa diabaikan dulu
   min_perp_size_usd: 5000
   risk_per_trade_default: 0.01   # 1% risk per trade
 
-# Wallet yang kamu anggap "smart money"
+# seed wallet yang ingin kamu ikuti
 tracked_wallets:
   - address: "0xMOCKWALLET"
     initial_score: 85
     initial_tier: "S"
+  # nanti ganti/tambah wallet beneran di sini
