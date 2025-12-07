@@ -18,8 +18,3 @@ thresholds:
 discovery:
   top_n: 50             # ambil top 50 dari leaderboard
   min_account_value: 10000   # minimal equity $10k
-
-tracked_wallets:
-  - address: "0xMOCKWALLET"
-    initial_score: 85
-    initial_tier: "S"
