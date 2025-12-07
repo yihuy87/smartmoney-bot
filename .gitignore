@@ -6,7 +6,7 @@ __pycache__/
 # Virtual env
 venv/
 
-# Environment / secrets (kalau nanti pakai .env)
+# Environment / secrets
 .env
 
 # SQLite database file
@@ -16,9 +16,9 @@ smartmoney.db
 .vscode/
 .idea/
 
-# Log files
+# Logs
 *.log
 
-# Mac/Windows junk
+# OS junk
 .DS_Store
 Thumbs.db
