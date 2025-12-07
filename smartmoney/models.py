@@ -11,8 +11,20 @@ class Wallet(Base):
     __tablename__ = "wallets"
 
     address = Column(String, primary_key=True)
+
+    # skor & tier internal bot
     smart_score = Column(Float, default=0.0)
     tier = Column(String, default="ignore")  # S, A, B, ignore
+
+    # --- data leaderboard / statistik agregat ---
+    # total equity/account value (USDC)
+    account_value_usd = Column(Float, default=0.0)
+    # total PnL sepanjang waktu (USDC)
+    pnl_all_usd = Column(Float, default=0.0)
+    # total ROI sepanjang waktu (dalam fraksi, 0.5 = 50%)
+    roi_all = Column(Float, default=0.0)
+
+    # --- field lama (boleh dibiarkan, walau belum terisi benar) ---
     winrate_30d = Column(Float, default=0.0)
     pnl_30d_usd = Column(Float, default=0.0)
     max_drawdown_30d = Column(Float, default=0.0)
