@@ -30,14 +30,11 @@ def create_signals_from_events(
     min_perp_size_usd: float,
 ) -> List[Signal]:
     """
-    Versi sederhana:
-    - SPOT: masih didukung tapi saat ini jarang dipakai (kita fokus perp).
-    - PERP: semua wallet yang ada di DB bisa menghasilkan sinyal,
-      selama:
+    - SPOT: masih didukung tapi bukan fokus utama (boleh saja dibiarkan kosong).
+    - PERP: hanya wallet S-tier yang boleh menghasilkan sinyal,
+      dengan syarat:
         - size_usd >= min_perp_size_usd
         - event_type in ("OPEN", "INCREASE")
-    Tier (S/A/B/ignore) masih disimpan di Signal, tapi tidak difilter di sini.
-    Filter tier bisa ditambahkan lagi setelah kamu yakin sinyal sudah keluar.
     """
 
     contexts = group_events_by_wallet_and_asset(spot_events, perp_events)
@@ -54,7 +51,7 @@ def create_signals_from_events(
             db.add(wallet)
             db.commit()
 
-        # === SPOT signals (opsional, dibiarkan rapi) ===
+        # === SPOT signals (opsional, tetap ada tapi jarang dipakai) ===
         for e in ctx["spot"]:
             try:
                 if e["amount_usd"] < min_spot_size_usd:
@@ -84,9 +81,15 @@ def create_signals_from_events(
         # === PERP signals (fokus utama) ===
         for e in ctx["perp"]:
             try:
+                # hanya wallet S-tier yang dianggap benar-benar Smart Money
+                if wallet.tier != "S":
+                    continue
+
+                # buang posisi kecil
                 if e["size_usd"] < min_perp_size_usd:
                     continue
 
+                # hanya entry / tambah posisi yang dijadikan sinyal
                 if e["event_type"] not in ("OPEN", "INCREASE"):
                     continue
 
