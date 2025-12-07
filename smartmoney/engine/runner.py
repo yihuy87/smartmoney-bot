@@ -1,4 +1,3 @@
-# smartmoney/engine/runner.py
 import time
 import yaml
 from loguru import logger
@@ -23,29 +22,31 @@ def load_config():
 
 def seed_tracked_wallets(db: Session, config):
     """
-    Seed awal dari config.tracked_wallets (opsional).
-    Leaderboard discovery akan menambah wallet lain kemudian.
+    Masukkan wallet manual dari config.yaml (opsional).
+    Leaderboard discovery akan menambah wallet otomatis.
     """
     tracked = config.get("tracked_wallets", [])
     for w in tracked:
-        addr = w["address"]
+        addr = w["address"].lower()
         wallet = db.query(Wallet).get(addr)
         if not wallet:
             wallet = Wallet(address=addr)
             db.add(wallet)
+
         wallet.smart_score = w.get("initial_score", 0)
-        wallet.tier = w.get("initial_tier", "A")
+        wallet.tier = w.get("initial_tier", "ignore")
+
     db.commit()
 
 
 def main_loop():
     config = load_config()
     thresholds = config["thresholds"]
-    min_spot_size_usd = thresholds["min_spot_size_usd"]   # tidak terpakai sekarang (spot off)
+    min_spot_size_usd = thresholds["min_spot_size_usd"]   # tidak digunakan
     min_perp_size_usd = thresholds["min_perp_size_usd"]
     risk_default = thresholds["risk_per_trade_default"]
 
-    # Telegram (opsional)
+    # Telegram
     tele = None
     if config["telegram"]["enabled"]:
         tele = TelegramAlerter(
@@ -53,15 +54,15 @@ def main_loop():
             chat_id=env("TELEGRAM_CHAT_ID"),
         )
 
-    # Seed manual wallets dari config
+    # === Seed awal wallet manual ===
     db0 = SessionLocal()
     seed_tracked_wallets(db0, config)
 
-    # Initial discovery leaderboard
-    refresh_leaderboard_wallets(db0)
+    # === First discovery leaderboard ===
+    refresh_leaderboard_wallets(db0)  # ini akan memasukkan wallet top leaderboard ke DB
     db0.close()
 
-    # Perp connector Hyperliquid
+    # === Init perp connector ===
     perp_connectors = []
     for p in config.get("perp_platforms", []):
         if p["name"] == "hyperliquid":
@@ -72,58 +73,60 @@ def main_loop():
         logger.error("No perp connectors configured. Check config.yaml")
         return
 
-    last_ts_perp = {pc.platform_name: int(time.time()) - 60 for pc in perp_connectors}
-    last_discovery_ts = int(time.time()) - 3600  # supaya di loop pertama langsung refresh
+    # Simpan last timestamp untuk fetch perp
+    last_ts_perp = {pc.platform_name: int(time.time()) - 120 for pc in perp_connectors}
 
-    logger.info("Starting main loop (perp-only Hyperliquid + leaderboard discovery)...")
+    # Supaya loop pertama langsung discovery
+    last_discovery_ts = int(time.time()) - 3600
+
+    logger.info("Starting main loop (Hyperliquid perp-only + auto-leaderboard tracking)...")
+
     while True:
         db = SessionLocal()
         try:
-            all_spot_events = []   # kosong (kita nggak pakai spot sekarang)
+            all_spot_events = []  # kosong (spot nonaktif)
             all_perp_events = []
 
             now_ts = int(time.time())
 
-            # ==== Leaderboard discovery setiap ~15 menit ====
+            # === Leaderboard refresh setiap 15 menit ===
             if now_ts - last_discovery_ts > 900:
+                logger.info("[Discovery] Updating leaderboard wallets...")
                 refresh_leaderboard_wallets(db)
                 last_discovery_ts = now_ts
 
-            # ==== Tentukan wallet yang mau di-follow ====
-            # Strategi sederhana:
-            # - semua wallet di tabel Wallet (manual + leaderboard)
+            # === Ambil semua wallet di DB sebagai tracked list ===
             wallets_in_db = [w.address for w in db.query(Wallet).all()]
             for pc in perp_connectors:
                 if hasattr(pc, "set_tracked_wallets"):
                     pc.set_tracked_wallets(wallets_in_db)
 
-            # ==== Ambil event perp untuk wallet tersebut ====
+            # === Fetch perp events ===
             for pc in perp_connectors:
                 ev = pc.fetch_new_events(last_ts_perp[pc.platform_name])
                 all_perp_events.extend(ev)
                 last_ts_perp[pc.platform_name] = now_ts
 
-            # ==== Update skor wallet untuk wallet yang ada event baru ====
+            # === Update skor wallet yang baru ada event ===
             affected_wallets = set()
             for e in all_perp_events:
-            affected_wallets.add(e["wallet_address"].lower())
+                affected_wallets.add(e["wallet_address"].lower())
 
             for addr in affected_wallets:
                 wallet = db.query(Wallet).get(addr)
                 if not wallet:
-                    # kalau ada wallet baru (misal dari config manual, belum pernah masuk leaderboard)
                     wallet = Wallet(address=addr)
                     db.add(wallet)
 
-            score = compute_smart_score_from_wallet(wallet)
-            tier = classify_tier(score)
+                score = compute_smart_score_from_wallet(wallet)
+                tier = classify_tier(score)
 
-            wallet.smart_score = score
-            wallet.tier = tier
+                wallet.smart_score = score
+                wallet.tier = tier
 
             db.commit()
 
-            # ==== Signals dari perp (spot_events kosong) ====
+            # === Generate signals dari perp saja ===
             new_signals = create_signals_from_events(
                 db,
                 all_spot_events,
@@ -132,19 +135,20 @@ def main_loop():
                 min_perp_size_usd=min_perp_size_usd,
             )
 
-            # ==== Signals → Alerts (+ trade setup) ====
+            # === Signals → Alerts (dengan setup entry/SL/TP) ===
             alerts = process_signals_into_alerts(
                 db,
                 new_signals,
                 risk_per_trade_default=risk_default,
             )
 
-            # ==== Kirim Telegram (kalau aktif) ====
+            # === Kirim Telegram ===
             if tele:
                 for a in alerts:
                     tele.send_alert(a)
 
             db.close()
+
         except Exception as e:
             logger.exception(f"Error in main loop: {e}")
             db.close()
