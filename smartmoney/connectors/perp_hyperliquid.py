@@ -10,10 +10,10 @@ from .base_perp import BasePerpConnector
 class HyperliquidConnector(BasePerpConnector):
     """
     Connector perp Hyperliquid pakai Info API (public):
+    - Endpoint: POST https://api.hyperliquid.xyz/info
     - type: "userFillsByTime"
     - Per wallet, ambil trade perp (Open/Increase Long/Short)
     - Daftar wallet diisi dinamis lewat .set_tracked_wallets([...])
-    Dok: info endpoint & userFillsByTime.2
     """
 
     def __init__(self, base_url: str = "https://api.hyperliquid.xyz/info"):
@@ -21,14 +21,21 @@ class HyperliquidConnector(BasePerpConnector):
         self.base_url = base_url.rstrip("/")
         self._tracked_wallets: List[str] = []
 
-    # === new: dynamic list ===
     def set_tracked_wallets(self, wallets: List[str]):
-        # normalisasi: lowercase + unik
+        """
+        Set ulang daftar wallet yang akan di-scan.
+        wallets: list of address string (0x...)
+        """
         uniq = {w.lower() for w in wallets if w}
         self._tracked_wallets = list(uniq)
         logger.info(f"[Hyperliquid] Tracked wallets updated, count={len(self._tracked_wallets)}")
 
     def _fetch_fills_for_wallet(self, wallet: str, since_ts: int) -> List[Dict[str, Any]]:
+        """
+        Call userFillsByTime untuk 1 wallet:
+        - startTime / endTime dalam ms
+        - since_ts masuk dalam detik → dikali 1000
+        """
         start_ms = since_ts * 1000
         end_ms = int(time.time() * 1000)
 
@@ -45,7 +52,7 @@ class HyperliquidConnector(BasePerpConnector):
                 self.base_url,
                 json=body,
                 headers={"Content-Type": "application/json"},
-                timeout=10,
+                timeout=15,
             )
             resp.raise_for_status()
         except Exception as e:
@@ -65,6 +72,17 @@ class HyperliquidConnector(BasePerpConnector):
         return fills
 
     def fetch_new_events(self, since_ts: int) -> List[Dict[str, Any]]:
+        """
+        Convert fills -> perp events:
+        - Filter hanya perp coin (coin tidak dimulai '@' dan tidak mengandung '/')
+        - Gunakan field `dir`:
+          * "Open Long"      → LONG,  OPEN
+          * "Open Short"     → SHORT, OPEN
+          * "Increase Long"  → LONG,  INCREASE
+          * "Increase Short" → SHORT, INCREASE
+        - size_usd = px * sz
+        - time dari API dalam ms → kita convert ke detik
+        """
         all_events: List[Dict[str, Any]] = []
         now = int(time.time())
 
@@ -81,11 +99,13 @@ class HyperliquidConnector(BasePerpConnector):
             for f in fills:
                 try:
                     coin = f.get("coin")
-                    # Spot fill: coin '@idx' atau 'PURR/USDC' → kita skip, mau perp coin saja
+                    # Spot / index fill biasanya '@...' atau 'TOKEN/USDC' → skip
                     if not coin or coin.startswith("@") or "/" in coin:
                         continue
 
-                    dir_str = f.get("dir", "")
+                    dir_str = f.get("dir", "") or ""
+                    dir_str = str(dir_str)
+
                     if "Open Long" in dir_str:
                         direction = "LONG"
                         event_type = "OPEN"
@@ -99,20 +119,27 @@ class HyperliquidConnector(BasePerpConnector):
                         direction = "SHORT"
                         event_type = "INCREASE"
                     else:
-                        # Close / lainnya nggak dipakai sebagai sinyal entry
+                        # Close / reduce / lainnya tidak kita pakai sebagai entry sinyal
                         continue
 
                     px = float(f.get("px", "0") or 0.0)
                     sz = float(f.get("sz", "0") or 0.0)
                     size_usd = px * sz
-                    ts = int(f.get("time", now))
+
+                    raw_time = f.get("time", now)
+                    try:
+                        ts_ms = int(raw_time)
+                        # convert ms → detik
+                        ts = ts_ms // 1000
+                    except Exception:
+                        ts = now
 
                     if size_usd <= 0:
                         continue
 
                     all_events.append(
                         {
-                            "wallet_address": wal,
+                            "wallet_address": wal.lower(),
                             "platform": self.platform_name,
                             "pair": f"{coin}-PERP",
                             "direction": direction,
