@@ -1,0 +1,7 @@
+SQLAlchemy
+pydantic
+PyYAML
+python-telegram-bot
+web3
+requests
+loguru
