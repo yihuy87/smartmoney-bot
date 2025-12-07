@@ -82,7 +82,7 @@ def create_signals_from_events(
         for e in ctx["perp"]:
             try:
                 # hanya wallet S-tier yang dianggap benar-benar Smart Money
-                if wallet.tier != "S":
+                if wallet.tier != "A":
                     continue
 
                 # buang posisi kecil
