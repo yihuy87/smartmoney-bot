@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..models import Wallet
-from ..scoring import compute_smart_score, classify_tier, WalletStats
+from ..scoring import compute_smart_score_from_wallet, classify_tier
 from ..tracked import get_tracked_wallet_info
 from ..connectors.perp_hyperliquid import HyperliquidConnector
 from ..bots.telegram_bot import TelegramAlerter
