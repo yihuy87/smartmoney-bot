@@ -1,0 +1,2 @@
+# smartmoney-bot
+smartmoney-bot
